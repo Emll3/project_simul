@@ -580,26 +580,23 @@ class Simulation:
             self.movingAvgUrgentScanWT.append(0.0)
             self.movingAvgOT.append(0.0)
 
-    def runSimulations(self, output_csv: str = None, strategy: str = '', num_urgent: int = 0) -> dict:
+    def runSimulations(self, replication_rows: list = None, strategy: str = '', num_urgent: int = 0) -> dict:
         """
-        Function that runs all the simulations and optionally writes results to CSV.
+        Run all replications and collect results.
 
         Args:
-            output_csv (str): Path to CSV file. If None, results are only printed.
-            strategy (str): Strategy label (e.g. 'S1', 'S2', 'S3') for CSV logging.
-            num_urgent (int): Number of urgent slots for CSV logging.
+            replication_rows (list): Shared list to accumulate per-replication rows for Excel output.
+            strategy (str): Strategy label (e.g. 'S1', 'S2', 'S3').
+            num_urgent (int): Number of urgent slots.
 
         Returns:
             dict: Average results across all replications.
         """
-        import csv, os
-
         electiveAppWT: float = 0
         electiveScanWT: float = 0
         urgentScanWT: float = 0
         OT: float = 0
         OV: float = 0
-        replication_results = []
 
         self.setWeekSchedule()
         print(f"\n[Strategy={strategy}, UrgentSlots={num_urgent}, Rule={self.rule}]")
@@ -614,17 +611,15 @@ class Simulation:
             urgentScanWT += self.avgUrgentScanWt
             OT += self.avgOT
             OV += ov_r
-            replication_results.append({
-                'strategy': strategy,
-                'num_urgent': num_urgent,
-                'rule': self.rule,
-                'replication': r,
-                'elAppWT': self.avgElectiveAppWT,
-                'elScanWT': self.avgElectiveScanWT,
-                'urScanWT': self.avgUrgentScanWt,
-                'OT': self.avgOT,
-                'OV': ov_r,
-            })
+            if replication_rows is not None:
+                replication_rows.append([
+                    strategy, num_urgent, self.rule, r,
+                    round(self.avgElectiveAppWT, 6),
+                    round(self.avgElectiveScanWT, 6),
+                    round(self.avgUrgentScanWt, 6),
+                    round(self.avgOT, 6),
+                    round(ov_r, 6),
+                ])
             if r % 100 == 0:
                 print(f"{r} \t {self.avgElectiveAppWT:.2f} \t\t {self.avgElectiveScanWT:.5f} \t {self.avgUrgentScanWt:.2f} \t\t {self.avgOT:.2f} \t {ov_r:.2f}")
 
@@ -636,18 +631,6 @@ class Simulation:
         print("------------------------------------------------------------------------")
         print(f"AVG: \t {electiveAppWT:.2f} \t\t {electiveScanWT:.5f} \t {urgentScanWT:.2f} \t\t {OT:.2f} \t {OV:.2f}\n")
 
-        # Write to CSV
-        if output_csv:
-            file_exists = os.path.exists(output_csv)
-            with open(output_csv, 'a', newline='', encoding='utf-8') as f:
-                fieldnames = ['strategy', 'num_urgent', 'rule', 'replication',
-                              'elAppWT', 'elScanWT', 'urScanWT', 'OT', 'OV']
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                if not file_exists:
-                    writer.writeheader()
-                writer.writerows(replication_results)
-            print(f"Results appended to {output_csv}")
-
         return {
             'strategy': strategy, 'num_urgent': num_urgent, 'rule': self.rule,
             'elAppWT': electiveAppWT, 'elScanWT': electiveScanWT,
@@ -656,23 +639,23 @@ class Simulation:
 
 
 if __name__ == "__main__":
-    import csv, os
+    import os
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
 
-    # ── Experiment settings ────────────────────────────────────────────────
+    # ── Experiment settings ─────────────────────────────────────────────────
     W = 100           # Number of weeks per replication (run length)
     R = 30            # Number of replications (increase for final results, e.g. 1000)
-    OUTPUT_CSV = "results.csv"
+    OUTPUT_XLSX = "results.xlsx"
     SCHEDULES_DIR = "schedules"
 
     STRATEGIES = ['S1', 'S2', 'S3']
     URGENT_COUNTS = list(range(10, 21))   # 10 to 20 urgent slots
-    RULES = [1, 2, 3, 4]                  # All 4 appointment scheduling rules
+    RULES = [1, 2, 3, 4]
 
-    # Clear output file if it exists
-    if os.path.exists(OUTPUT_CSV):
-        os.remove(OUTPUT_CSV)
-
-    summary_rows = []
+    replication_rows = []   # all per-replication rows
+    summary_rows = []       # averages per configuration
 
     for strategy in STRATEGIES:
         for n_urgent in URGENT_COUNTS:
@@ -683,18 +666,76 @@ if __name__ == "__main__":
             for rule in RULES:
                 sim = Simulation(schedule_file, W, R, rule)
                 result = sim.runSimulations(
-                    output_csv=OUTPUT_CSV,
+                    replication_rows=replication_rows,
                     strategy=strategy,
                     num_urgent=n_urgent,
                 )
                 summary_rows.append(result)
 
-    # Write summary (averages per configuration)
-    summary_file = "summary.csv"
-    with open(summary_file, 'w', newline='', encoding='utf-8') as f:
-        fieldnames = ['strategy', 'num_urgent', 'rule',
-                      'elAppWT', 'elScanWT', 'urScanWT', 'OT', 'OV']
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(summary_rows)
-    print(f"\nSummary written to {summary_file}")
+    # ── Write Excel ──────────────────────────────────────────────────────────
+    wb = Workbook()
+
+    HEADER_FILL  = PatternFill("solid", fgColor="1F4E79")
+    HEADER_FONT  = Font(name="Arial", bold=True, color="FFFFFF", size=10)
+    BODY_FONT    = Font(name="Arial", size=10)
+    ALT_FILL     = PatternFill("solid", fgColor="DCE6F1")
+    CENTER       = Alignment(horizontal="center", vertical="center")
+    LEFT         = Alignment(horizontal="left",   vertical="center")
+    thin         = Side(style="thin", color="BFBFBF")
+    BORDER       = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def style_header(ws, headers, col_widths):
+        ws.append(headers)
+        for col_idx, (cell, width) in enumerate(zip(ws[1], col_widths), start=1):
+            cell.font      = HEADER_FONT
+            cell.fill      = HEADER_FILL
+            cell.alignment = CENTER
+            cell.border    = BORDER
+            ws.column_dimensions[get_column_letter(col_idx)].width = width
+        ws.row_dimensions[1].height = 18
+        ws.freeze_panes = "A2"
+
+    def style_body(ws, start_row=2):
+        for row_idx, row in enumerate(ws.iter_rows(min_row=start_row), start=start_row):
+            fill = ALT_FILL if row_idx % 2 == 0 else None
+            for cell in row:
+                cell.font   = BODY_FONT
+                cell.border = BORDER
+                if fill:
+                    cell.fill = fill
+                if isinstance(cell.value, float):
+                    cell.number_format = "0.000000"
+                    cell.alignment     = CENTER
+                elif isinstance(cell.value, int):
+                    cell.alignment = CENTER
+                else:
+                    cell.alignment = LEFT
+
+    # Sheet 1 – Replications
+    ws1 = wb.active
+    ws1.title = "Replications"
+    rep_headers  = ["Strategy", "Urgent Slots", "Rule", "Replication",
+                    "elAppWT (h)", "elScanWT (h)", "urScanWT (h)", "OT (h)", "OV"]
+    rep_widths   = [12, 14, 8, 14, 14, 14, 14, 10, 10]
+    style_header(ws1, rep_headers, rep_widths)
+    for row in replication_rows:
+        ws1.append(row)
+    style_body(ws1)
+
+    # Sheet 2 – Summary (averages per config)
+    ws2 = wb.create_sheet("Summary")
+    sum_headers = ["Strategy", "Urgent Slots", "Rule",
+                   "Avg elAppWT (h)", "Avg elScanWT (h)", "Avg urScanWT (h)", "Avg OT (h)", "Avg OV"]
+    sum_widths  = [12, 14, 8, 16, 16, 16, 12, 10]
+    style_header(ws2, sum_headers, sum_widths)
+    for r in summary_rows:
+        ws2.append([
+            r['strategy'], r['num_urgent'], r['rule'],
+            round(r['elAppWT'],  6), round(r['elScanWT'], 6),
+            round(r['urScanWT'], 6), round(r['OT'],       6),
+            round(r['OV'],       6),
+        ])
+    style_body(ws2)
+
+    wb.save(OUTPUT_XLSX)
+    print(f"\nResults written to {OUTPUT_XLSX}")
