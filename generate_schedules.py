@@ -71,43 +71,42 @@ def strategy1(num_urgent: int) -> list[list[int]]:
 
 # ── Strategy 2 ──────────────────────────────────────────────────────────────
 # Urgent slots evenly distributed over the day (as illustrated in Appendix Fig 5).
-
 def strategy2(num_urgent: int) -> list[list[int]]:
     """
     Urgent slots evenly distributed over the available slots per day.
+    Uses Bresenham-style even spacing to avoid duplicates.
     Returns a 32x6 grid.
     """
     schedule = [[1] * NUM_DAYS for _ in range(FULL_SLOTS)]
 
-    # Slots per day (available indices)
-    day_slots = {d: list(range(get_available_slots(d))) for d in range(NUM_DAYS)}
+    total = total_slots_per_week()  # 160
 
-    # Total available slots
-    total = total_slots_per_week()
-
-    # Distribute num_urgent proportionally, then place evenly within each day
+    # Distribute num_urgent proportionally per day
     urgent_per_day = {}
-    remaining = num_urgent
-    day_counts = {d: get_available_slots(d) for d in range(NUM_DAYS)}
     for d in range(NUM_DAYS):
-        share = round(num_urgent * day_counts[d] / total)
-        urgent_per_day[d] = share
-    # Adjust rounding errors
-    diff = sum(urgent_per_day.values()) - num_urgent
-    for d in sorted(urgent_per_day, key=lambda x: urgent_per_day[x], reverse=(diff > 0)):
-        if diff == 0:
-            break
-        urgent_per_day[d] -= 1 if diff > 0 else -1
-        diff -= 1 if diff > 0 else -1
+        urgent_per_day[d] = num_urgent * get_available_slots(d) / total
+
+    # Convert to integers while preserving total exactly (largest-remainder method)
+    floored = {d: int(urgent_per_day[d]) for d in range(NUM_DAYS)}
+    remainders = sorted(range(NUM_DAYS), key=lambda d: -(urgent_per_day[d] - floored[d]))
+    diff = num_urgent - sum(floored.values())
+    for d in remainders[:diff]:
+        floored[d] += 1
+    urgent_per_day = floored
 
     for d in range(NUM_DAYS):
         n = urgent_per_day[d]
-        available = day_slots[d]
+        available = get_available_slots(d)
         if n == 0:
             continue
-        # Evenly space n slots across the available slots
-        step = len(available) / n
-        chosen = [available[round(i * step + step / 2)] for i in range(n)]
+
+        # Bresenham-style even spacing: guarantees no duplicates
+        chosen = set()
+        for i in range(n):
+            # Maps i to an evenly spaced index across 'available' slots
+            idx = int((i + 0.5) * available / n)
+            chosen.add(idx)
+
         for s in chosen:
             schedule[s][d] = 2
 
@@ -116,26 +115,23 @@ def strategy2(num_urgent: int) -> list[list[int]]:
 
 # ── Strategy 3 ──────────────────────────────────────────────────────────────
 # After every 6 elective slots, one urgent slot (from beginning of session).
-
 def strategy3(num_urgent: int) -> list[list[int]]:
     """
-    Starting from beginning: after every block of 6 elective slots, insert 1 urgent slot.
-    The number of urgent slots placed may slightly differ from num_urgent;
-    the schedule structure takes priority per the assignment description.
+    Starting from the beginning of a session, one urgent slot is placed
+    after every block of 6 elective slots. num_urgent is ignored — the
+    total follows naturally from the block size (every 7th slot is urgent).
     Returns a 32x6 grid.
     """
     schedule = [[1] * NUM_DAYS for _ in range(FULL_SLOTS)]
 
     for d in range(NUM_DAYS):
-        available = list(range(get_available_slots(d)))
         elective_count = 0
-        for s in available:
+        for slot_idx in range(get_available_slots(d)):
             if elective_count == 6:
-                schedule[s][d] = 2
+                schedule[slot_idx][d] = 2  # urgent slot after 6 elective
                 elective_count = 0
             else:
-                schedule[s][d] = 1
-                elective_count += 1
+                elective_count += 1  # remains elective (already 1)
 
     return schedule
 

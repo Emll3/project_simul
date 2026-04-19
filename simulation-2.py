@@ -129,6 +129,21 @@ class Simulation:
             R (int): Number of replications
             rule (int): The appointment scheduling rule to apply
         """
+        self.movingAvgElectiveAppWT = list()
+        self.movingAvgElectiveScanWT = list()
+        self.movingAvgUrgentScanWT = list()
+        self.movingAvgOT = list()
+
+
+         # random number streams for CRN
+        self.rng_el_arrival = None
+        self.rng_ur_arrival = None
+        self.rng_tardiness = None
+        self.rng_noshow = None
+        self.rng_el_duration = None
+        self.rng_scan_type = None
+        self.rng_ur_duration = None
+
         self.patients = list()
         self.inputFileName = filename
         self.W = W
@@ -162,18 +177,18 @@ class Simulation:
             for d in range(self.D):
                 # Start off by generating elective patients
                 if (d < self.D - 1):  # not on sunday
-                    arrivalTimeNext = 8 + Exponential_distribution(self.lambdaElective) * (17 - 8)
+                    arrivalTimeNext = 8 + Exponential_distribution(self.lambdaElective, self.rng_el_arrival) * (17 - 8)
                     while (arrivalTimeNext < 17):
-                        tardiness = Normal_distribution(self.meanTardiness, self.stdevTardiness) / 60
-                        noShow = Bernouilli_distribution(self.probNoShow)
-                        duration = Normal_distribution(self.meanElectiveDuration, self.stdevElectiveDuration) / 60
+                        tardiness = Normal_distribution(self.meanTardiness, self.stdevTardiness, self.rng_tardiness) / 60
+                        noShow = Bernouilli_distribution(self.probNoShow, self.rng_noshow)
+                        duration = Normal_distribution(self.meanElectiveDuration, self.stdevElectiveDuration, self.rng_el_duration) / 60
                         # create a patient with all the calculated data and add it to the list for simulation:
                         # they arrive in the current week (outer loop: w) at the current day (inner loop: d)
                         # all patients have a time of arrival (arrivalTimeNext), can be late or early (tardiness),
                         # they also have a probability of not showing up at all (noShow), and a given duration for their procedure
                         self.patients.append(Patient(counter, 1, 0, w, d, arrivalTimeNext, tardiness, noShow, duration))
                         counter += 1
-                        arrivalTimeNext += Exponential_distribution(self.lambdaElective) * (17 - 8)
+                        arrivalTimeNext += Exponential_distribution(self.lambdaElective, self.rng_el_arrival) * (17 - 8)
 
                 lmbd = self.lambdaUrgent[0]
                 endTime = 17
@@ -182,15 +197,19 @@ class Simulation:
                 if ((d == 3) or (d == 5)):
                     lmbd = self.lambdaUrgent[1]
                     endTime = 12
-                arrivalTimeNext = 8 + Exponential_distribution(lmbd) * (endTime - 8)
+                arrivalTimeNext = 8 + Exponential_distribution(lmbd, self.rng_ur_arrival) * (endTime - 8)
                 while (arrivalTimeNext < endTime):
                     noShow = 0  # Urgent patients always show up, would be silly otherwise
                     tardiness = 0  # Urgent patients are not planned and therefore cannot be late
                     scanType = self.getRandomScanType()
-                    duration = Normal_distribution(self.meanUrgentDuration[scanType], self.stdevUrgentDuration[scanType]) / 60
+                    duration = Normal_distribution(
+                        self.meanUrgentDuration[scanType],
+                        self.stdevUrgentDuration[scanType],
+                        self.rng_ur_duration
+                    ) / 60
                     self.patients.append(Patient(counter, 2, scanType, w, d, arrivalTimeNext, tardiness, noShow, duration))
                     counter += 1
-                    arrivalTimeNext += Exponential_distribution(lmbd) * (endTime - 8)
+                    arrivalTimeNext += Exponential_distribution(lmbd, self.rng_ur_arrival) * (endTime - 8)
 
     def getRandomScanType(self) -> int:
         """
@@ -200,7 +219,7 @@ class Simulation:
         Returns:
             int: integer corresponding to the type of scan
         """
-        r = random.random()
+        r = self.rng_scan_type.random()
         for idx, prob in enumerate(self.cumulativeProbUrgentType):
             if r < prob:
                 return idx
@@ -557,19 +576,11 @@ class Simulation:
                     # Lunchbreak, so skip ahead
                     time = 13
 
-    def resetSystem(self) -> None:
-        """
-        Resets all variables that are related to 1 replication.
-        """
+    def resetSystem(self, base_seed: int) -> None:
         self.patients = list()
         self.avgElectiveAppWT = 0.0
-        self.avgElectiveScanWT = 0.0
-        self.avgUrgentScanWt = 0.0
-        self.avgOT = 0.0
-        self.numberOfElectivePatientsPlanned = 0
-        self.numberOfUrgentPatientsPlanned = 0
+        # ... other resets ...
 
-        # test this;
         self.movingAvgElectiveAppWT = []
         self.movingAvgElectiveScanWT = []
         self.movingAvgUrgentScanWT = []
@@ -579,6 +590,15 @@ class Simulation:
             self.movingAvgElectiveScanWT.append(0.0)
             self.movingAvgUrgentScanWT.append(0.0)
             self.movingAvgOT.append(0.0)
+
+        # ← RNG initialization OUTSIDE the loop
+        self.rng_el_arrival  = random.Random(base_seed + 101)
+        self.rng_ur_arrival  = random.Random(base_seed + 202)
+        self.rng_tardiness   = random.Random(base_seed + 303)
+        self.rng_noshow      = random.Random(base_seed + 404)
+        self.rng_el_duration = random.Random(base_seed + 505)
+        self.rng_scan_type   = random.Random(base_seed + 606)
+        self.rng_ur_duration = random.Random(base_seed + 707)
 
     def runSimulations(self, replication_rows: list = None, strategy: str = '', num_urgent: int = 0) -> dict:
         """
@@ -602,8 +622,7 @@ class Simulation:
         print(f"\n[Strategy={strategy}, UrgentSlots={num_urgent}, Rule={self.rule}]")
         print("r \t elAppWT \t elScanWT \t urScanWT \t OT \t OV")
         for r in range(self.R):
-            self.resetSystem()
-            random.seed(r)
+            self.resetSystem(base_seed=r)
             self.runOneSimulation()
             ov_r = self.avgElectiveAppWT * self.weightEl + self.avgUrgentScanWt * self.weightUr
             electiveAppWT += self.avgElectiveAppWT
