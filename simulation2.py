@@ -188,7 +188,10 @@ class Simulation:
                         # they also have a probability of not showing up at all (noShow), and a given duration for their procedure
                         self.patients.append(Patient(counter, 1, 0, w, d, arrivalTimeNext, tardiness, noShow, duration))
                         counter += 1
-                        arrivalTimeNext += Exponential_distribution(self.lambdaElective, self.rng_el_arrival) * (17 - 8)
+                        # lambda = 28.345 aankomsten per dag van 9 uur
+                        # interaankomsttijd = Exp(28.345) in eenheden van 9 uur → omzetten naar uren
+                        interarrival = Exponential_distribution(self.lambdaElective, self.rng_el_arrival) / self.lambdaElective
+                        arrivalTimeNext = 8 + interarrival * 9
 
                 lmbd = self.lambdaUrgent[0]
                 endTime = 17
@@ -478,8 +481,8 @@ class Simulation:
             # for overtime, day 3 and 5 are halfdays:
             if ((prevDay > -1) and (prevDay != patient.scanDay)):
                 if ((prevDay == 3) or (prevDay == 5)):
-                    self.movingAvgOT[prevWeek] += max(0, prevScanEndTime - 13)
-                    self.avgOT += max(0.0, prevScanEndTime - 13)
+                    self.movingAvgOT[prevWeek] += max(0, prevScanEndTime - 12)
+                    self.avgOT += max(0.0, prevScanEndTime - 12)
                 else:
                     self.movingAvgOT[prevWeek] += max(0, prevScanEndTime - 17)
                     self.avgOT += max(0.0, prevScanEndTime - 17)
@@ -579,7 +582,11 @@ class Simulation:
     def resetSystem(self, base_seed: int) -> None:
         self.patients = list()
         self.avgElectiveAppWT = 0.0
-        # ... other resets ...
+        self.avgElectiveScanWT = 0.0
+        self.avgUrgentScanWt = 0.0
+        self.avgOT = 0.0
+        self.numberOfElectivePatientsPlanned = 0
+        self.numberOfUrgentPatientsPlanned = 0
 
         self.movingAvgElectiveAppWT = []
         self.movingAvgElectiveScanWT = []
@@ -591,7 +598,6 @@ class Simulation:
             self.movingAvgUrgentScanWT.append(0.0)
             self.movingAvgOT.append(0.0)
 
-        # ← RNG initialization OUTSIDE the loop
         self.rng_el_arrival  = random.Random(base_seed + 101)
         self.rng_ur_arrival  = random.Random(base_seed + 202)
         self.rng_tardiness   = random.Random(base_seed + 303)
@@ -664,14 +670,20 @@ if __name__ == "__main__":
     from openpyxl.utils import get_column_letter
 
     # ── Experiment settings ─────────────────────────────────────────────────
-    W = 100           # Number of weeks per replication (run length)
-    R = 30            # Number of replications (increase for final results, e.g. 1000)
+    W = 100
+    R = 30
+    STRATEGIES = ['S1']
+    URGENT_COUNTS = [14]
+    RULES = [1]
+   # warmup = 20
+   # W = warmup + 800           # Number of weeks per replication (run length)
+   # R = 30            # Number of replications (increase for final results, e.g. 1000)
     OUTPUT_XLSX = "results.xlsx"
     SCHEDULES_DIR = "schedules"
 
-    STRATEGIES = ['S1', 'S2', 'S3']
-    URGENT_COUNTS = list(range(10, 21))   # 10 to 20 urgent slots
-    RULES = [1, 2, 3, 4]
+    #STRATEGIES = ['S1', 'S2', 'S3']
+    #URGENT_COUNTS = list(range(10, 21))   # 10 to 20 urgent slots
+    #RULES = [1, 2, 3, 4]
 
     replication_rows = []   # all per-replication rows
     summary_rows = []       # averages per configuration
